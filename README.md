@@ -83,9 +83,9 @@ The solution is built using a **Master–Worker Agentic AI architecture**, ensur
 └───────────────┬──────────────┬──────────────┬──────────────┘
                 │              │              │
         ┌───────▼───────┐ ┌────▼─────┐ ┌──────▼────────┐ ┌────▼──────┐
-        │ Sales Agent    │ │Verification│ │Underwriting │ │Sanction   │
-        │ (Engagement)   │ │ Agent      │ │ Agent       │ │ Agent     │
-        └────────────────┘ └────────────┘ └──────────────┘ └───────────┘
+        │ Sales Agent    │ │Verification│ │Underwriting│ │Sanction   │
+        │ (Engagement)   │ │ Agent      │ │ Agent      │ │ Agent     │
+        └────────────────┘ └────────────┘ └────────────┘ └───────────┘
                                    │
                           ┌────────▼────────┐
                           │ MongoDB / Mock   │
@@ -529,12 +529,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
-
----
-
-## 📧 Support
-
-For issues and questions, please open an issue on GitHub or contact the development team.
 
 ---
 
