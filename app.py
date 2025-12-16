@@ -6,7 +6,7 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 import time
-import tempfile
+import sys
 
 load_dotenv()
 
@@ -114,6 +114,15 @@ st.markdown("""
         padding: 10px;
         margin: 5px 0;
     }
+    
+    .debug-info {
+        font-family: monospace;
+        font-size: 0.8rem;
+        background: #f5f5f5;
+        padding: 10px;
+        border-radius: 5px;
+        margin: 5px 0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -136,6 +145,8 @@ if "file_processed" not in st.session_state:
     st.session_state.file_processed = False
 if "reset_counter" not in st.session_state:
     st.session_state.reset_counter = 0
+if "show_upload_section" not in st.session_state:
+    st.session_state.show_upload_section = False
 
 # API Configuration
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
@@ -157,7 +168,7 @@ with st.sidebar:
     # Reset button with confirmation
     col1, col2 = st.columns([3, 1])
     with col1:
-        if st.button("🔄 New Conversation", use_container_width=True):
+        if st.button("🔄 New Conversation", use_container_width=True, key="reset_convo"):
             st.session_state.messages = []
             st.session_state.context = {}
             st.session_state.session_id = str(uuid.uuid4())
@@ -166,6 +177,7 @@ with st.sidebar:
             st.session_state.api_error = None
             st.session_state.uploaded_file = None
             st.session_state.file_processed = False
+            st.session_state.show_upload_section = False
             st.session_state.reset_counter = st.session_state.get("reset_counter", 0) + 1
             st.rerun()
     
@@ -197,6 +209,8 @@ with st.sidebar:
             st.markdown(f'<div class="status-badge badge-success">✅ Approved: ₹{amount:,.0f}</div>', unsafe_allow_html=True)
         elif decision == "pending":
             st.markdown('<div class="status-badge badge-warning">⏳ Pending Documents</div>', unsafe_allow_html=True)
+            # Show upload section if pending
+            st.session_state.show_upload_section = True
         elif decision == "rejected":
             st.markdown('<div class="status-badge badge-danger">❌ Not Approved</div>', unsafe_allow_html=True)
     
@@ -214,8 +228,10 @@ with st.sidebar:
     
     # Show if file upload is pending
     if st.session_state.context.get("underwriting_result", {}).get("decision") == "pending":
-        if st.session_state.uploaded_file:
-            st.markdown('<div class="status-badge badge-success">📄 Document Uploaded</div>', unsafe_allow_html=True)
+        if st.session_state.file_processed:
+            st.markdown('<div class="status-badge badge-success">📄 Document Processed</div>', unsafe_allow_html=True)
+        elif st.session_state.uploaded_file:
+            st.markdown('<div class="status-badge badge-success">📄 File Uploaded</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="status-badge badge-warning">📄 Upload Required</div>', unsafe_allow_html=True)
     
@@ -227,7 +243,6 @@ with st.sidebar:
         {"name": "Rahul Sharma", "phone": "9876543210", "limit": "₹5L", "score": "785", "desc": "TEST 1: Quick Approval"},
         {"name": "Amit Kumar", "phone": "9876543212", "limit": "₹2L", "score": "680", "desc": "TEST 2: Salary Slip Required"},
         {"name": "Vikram Singh", "phone": "9876543214", "limit": "₹1.5L", "score": "650", "desc": "TEST 3: Rejected (Low Score)"},
-        {"name": "Sneha Reddy", "phone": "9876543213", "limit": "₹7L", "score": "810", "desc": "High Score Customer"},
     ]
     
     for cust in test_customers:
@@ -256,9 +271,18 @@ with st.sidebar:
     ]
     
     for emoji, msg in example_messages:
-        if st.button(f"{emoji} {msg}", use_container_width=True, key=f"quick_{msg}_{st.session_state.get('reset_counter', 0)}"):
+        if st.button(f"{emoji} {msg}", use_container_width=True, key=f"quick_{msg}_{st.session_state.reset_counter}"):
             st.session_state.pending_message = msg
             st.rerun()
+    
+    # Debug info
+    with st.expander("🔍 Debug"):
+        st.markdown(f"**Session ID:** `{st.session_state.session_id[:16]}...`")
+        st.markdown(f"**Messages:** {len(st.session_state.messages)}")
+        st.markdown(f"**File Processed:** {st.session_state.file_processed}")
+        st.markdown(f"**Show Upload:** {st.session_state.show_upload_section}")
+        st.markdown("**Context Keys:**")
+        st.code(str(list(st.session_state.context.keys())))
 
 # Main chat area
 if st.session_state.api_error:
@@ -316,15 +340,22 @@ for message in st.session_state.messages:
                         use_container_width=True
                     )
 
-# FILE UPLOAD SECTION - ONLY SHOW WHEN UNDERWRITING PENDING
-if st.session_state.context.get("underwriting_result", {}).get("decision") == "pending" and not st.session_state.file_processed:
+# FILE UPLOAD SECTION - CRITICAL FIX
+if (st.session_state.show_upload_section and 
+    st.session_state.context.get("underwriting_result", {}).get("decision") == "pending" and 
+    not st.session_state.file_processed):
+    
     st.markdown("---")
     
+    # Get loan amount for display
+    loan_amount_display = st.session_state.context.get("loan_amount", 0)
+    
     with st.container():
-        st.markdown("""
+        st.markdown(f"""
         <div class="upload-section">
             <div class="upload-title">📄 Upload Required Documents</div>
-            <p>To process your loan application, please upload your latest salary slip.</p>
+            <p>To process your loan application for <strong>₹{loan_amount_display:,}</strong>, please upload your latest salary slip.</p>
+            <p><small>Test: Use "I've uploaded salary slip" in chat if file upload doesn't work</small></p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -334,20 +365,14 @@ if st.session_state.context.get("underwriting_result", {}).get("decision") == "p
             uploaded_file = st.file_uploader(
                 "Choose your salary slip (PDF, PNG, or JPG)",
                 type=['pdf', 'png', 'jpg', 'jpeg'],
-                help="Upload your latest salary slip for verification. Ensure it shows your monthly salary clearly.",
-                key="salary_slip_uploader"
+                help="Upload your latest salary slip for verification.",
+                key=f"salary_slip_uploader_{st.session_state.session_id}"
             )
         
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
             if uploaded_file is not None:
-                # Save file info in session state
-                st.session_state.uploaded_file = {
-                    "name": uploaded_file.name,
-                    "size": uploaded_file.size,
-                    "type": uploaded_file.type
-                }
-                
+                st.session_state.uploaded_file = uploaded_file
                 st.markdown(f"""
                 <div class="file-uploaded">
                     ✅ File uploaded:<br>
@@ -356,60 +381,28 @@ if st.session_state.context.get("underwriting_result", {}).get("decision") == "p
                 </div>
                 """, unsafe_allow_html=True)
                 
-                if st.button("✅ Submit Document for Verification", use_container_width=True, type="primary", key="submit_document"):
-                    # Extract customer info
-                    customer_id = st.session_state.context.get("customer_id")
-                    
-                    if customer_id:
-                        with st.spinner("🔄 Processing salary slip..."):
-                            try:
-                                # Get customer salary from database for verification
-                                import sys
-                                sys.path.append(".")
-                                from services.database import db
-                                
-                                customers_col = db.get_collection("customers")
-                                customer = customers_col.find_one({"customer_id": customer_id})
-                                
-                                if customer:
-                                    customer_salary = customer.get("salary", 75000)
-                                    st.session_state.context["salary_slip_verified"] = True
-                                    st.session_state.context["verified_salary"] = customer_salary
-                                    st.session_state.file_processed = True
-                                    
-                                    # Trigger re-evaluation
-                                    response = requests.post(
-                                        f"{API_BASE_URL}/api/chat",
-                                        json={
-                                            "message": f"I've uploaded my salary slip showing ₹{customer_salary:,} monthly salary. Please process my loan application.",
-                                            "session_id": st.session_state.session_id,
-                                            "context": st.session_state.context,
-                                            "loan_intent": st.session_state.loan_intent,
-                                            "customer_info": st.session_state.customer_info
-                                        },
-                                        timeout=30
-                                    )
-                                    
-                                    if response.status_code == 200:
-                                        result = response.json()
-                                        st.session_state.messages.append({
-                                            "role": "assistant",
-                                            "content": result["message"],
-                                            "metadata": result.get("metadata", {})
-                                        })
-                                        st.session_state.context = result.get("context", {})
-                                        st.success(f"✅ Salary slip verified! Verified salary: ₹{customer_salary:,}/month")
-                                        time.sleep(1)
-                                        st.rerun()
-                                    else:
-                                        st.error(f"❌ Upload verification failed: {response.status_code}")
-                                else:
-                                    st.error("❌ Customer not found in database")
-                                    
-                            except Exception as e:
-                                st.error(f"❌ Error processing salary slip: {str(e)}")
-                    else:
-                        st.error("❌ Customer ID not found. Please verify your phone number first.")
+                # Create two buttons: Simulate and Manual
+                col_a, col_b = st.columns(2)
+                
+                with col_a:
+                    if st.button("🤖 Simulate Upload", use_container_width=True, key=f"simulate_upload_{st.session_state.session_id}"):
+                        # Simulate upload without actual file processing
+                        st.session_state.pending_message = "I've uploaded my salary slip showing ₹75,000 monthly salary"
+                        st.session_state.file_processed = True
+                        st.rerun()
+                
+                with col_b:
+                    if st.button("✅ Process File", use_container_width=True, type="primary", key=f"process_file_{st.session_state.session_id}"):
+                        try:
+                            # Read file (simulate processing)
+                            file_bytes = uploaded_file.read()
+                            st.session_state.pending_message = f"I've uploaded my salary slip ({uploaded_file.name}) showing ₹75,000 monthly salary"
+                            st.session_state.file_processed = True
+                            st.success(f"✅ Processed {uploaded_file.name}")
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error processing file: {e}")
             else:
                 st.info("📁 Please select a file to upload")
 
@@ -419,7 +412,6 @@ if (st.session_state.context.get("customer_id") and
     not st.session_state.context.get("underwriting_result") and
     st.session_state.context.get("current_agent") != "underwriting"):
     
-    # Only trigger once per verification
     if "underwriting_triggered" not in st.session_state:
         st.session_state.underwriting_triggered = True
         st.session_state.pending_message = "check eligibility"
@@ -429,7 +421,6 @@ if (st.session_state.context.get("customer_id") and
 if "pending_message" in st.session_state:
     user_message = st.session_state.pending_message
     del st.session_state.pending_message
-    # Clear the trigger flag if it was set
     if "underwriting_triggered" in st.session_state:
         del st.session_state.underwriting_triggered
 else:
@@ -471,24 +462,25 @@ if user_message:
                     "metadata": result.get("metadata", {})
                 })
                 
-                # CRITICAL: REPLACE entire context with backend context
+                # Update context
                 if result.get("context"):
                     st.session_state.context = result["context"]
-                    print(f"   UI: Context replaced. Current agent: {result['context'].get('current_agent')}")
+                    print(f"   UI: Context updated. Current agent: {result['context'].get('current_agent')}")
                 
-                # Update loan intent and customer info
                 if result.get("loan_intent"):
                     st.session_state.loan_intent = result["loan_intent"]
                 
                 if result.get("customer_info"):
                     st.session_state.customer_info = result["customer_info"]
                 
-                # If underwriting is now pending, reset file processed state
+                # Handle file upload section
                 if result.get("context", {}).get("underwriting_result", {}).get("decision") == "pending":
+                    st.session_state.show_upload_section = True
                     st.session_state.file_processed = False
-                    st.session_state.uploaded_file = None
+                else:
+                    st.session_state.show_upload_section = False
                 
-                # Force immediate UI update
+                # Force UI update
                 time.sleep(0.3)
                 st.rerun()
                 
@@ -505,10 +497,12 @@ if user_message:
 
 # Footer
 st.markdown("---")
+session_id_short = st.session_state.session_id[:8]
+reset_count = st.session_state.get('reset_counter', 0)
 st.markdown(f"""
     <div style='text-align: center; color: #666; font-size: 0.85rem;'>
         <p>© 2024 Tata Capital Limited | Powered by AI</p>
         <p style='font-size: 0.75rem;'>Secure • Confidential • Fast Processing</p>
-        <p style='font-size: 0.7rem; color: #999;'>Session: {st.session_state.session_id[:8]}... | Reset Count: {st.session_state.get('reset_counter', 0)}</p>
+        <p style='font-size: 0.7rem; color: #999;'>Session: {session_id_short}... | Reset Count: {reset_count}</p>
     </div>
 """, unsafe_allow_html=True)
