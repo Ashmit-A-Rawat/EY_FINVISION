@@ -40,8 +40,8 @@ class MasterAgent:
         
         Always respond naturally while maintaining the orchestration logic."""
     
-    def determine_next_agent(self, message: str, current_context: dict, loan_intent: LoanIntent = None) -> AgentType:
-        """Determine which agent should handle the message"""
+    def determine_next_agent(self, message: str, current_context: dict, request_loan_intent: LoanIntent = None) -> AgentType:
+        """Determine which agent should handle the message - FIXED ROUTING LOGIC"""
         message_lower = message.lower()
         
         # Check context first
@@ -53,29 +53,13 @@ class MasterAgent:
             if any(word in message_lower for word in ["yes", "generate", "sanction", "letter", "proceed", "ok", "sure", "download"]):
                 return AgentType.SANCTION
         
-        # Priority 2: If customer verified AND loan amount is known (FIXED)
+        # Priority 2: If customer verified - AUTO ROUTE TO UNDERWRITING
         if current_context.get("customer_id") and current_context.get("verification_result", {}).get("verified"):
-            # Check if loan_intent already has amount from previous messages (CRITICAL FIX)
-            existing_amount = loan_intent.amount if loan_intent else None
-            
-            # Check current message for amount keywords
-            has_amount = any(word in message_lower for word in ["lakh", "lac", "thousand", "₹", "rs", "amount"])
-            has_numbers = bool(re.search(r'\d+', message))
-            has_loan_intent_keywords = any(word in message_lower for word in ["need", "want", "loan", "borrow", "apply"])
-            
-            # Route to underwriting if:
-            # 1. Amount already captured in loan_intent, OR
-            # 2. Current message mentions amount, OR
-            # 3. User says "check eligibility" or similar
-            if existing_amount or has_amount or (has_numbers and has_loan_intent_keywords):
-                print(f"   ✅ Routing to Underwriting: existing_amount={existing_amount}, has_amount={has_amount}")
-                return AgentType.UNDERWRITING
-            
-            # Check for explicit underwriting triggers
-            if any(word in message_lower for word in ["eligibility", "eligible", "check", "approve", "emi", "salary", "uploaded", "slip"]):
-                return AgentType.UNDERWRITING
+            # CRITICAL FIX: Always route to underwriting after successful verification
+            print(f"   ✅ AUTO-ROUTING: Customer {current_context['customer_id']} verified → Underwriting")
+            return AgentType.UNDERWRITING
         
-        # Priority 3: Check for verification triggers - only if not verified yet
+        # Priority 3: Check for verification triggers
         if not current_context.get("customer_id"):
             # Phone number pattern
             if re.search(r'\d{10}', message):
@@ -173,24 +157,33 @@ class MasterAgent:
         return " | ".join(summary) if summary else "New Session"
     
     def process(self, request: AgentRequest) -> AgentResponse:
-        """Main orchestration method"""
+        """Main orchestration method - FIXED AUTO-ROUTING"""
         try:
             context = request.context.copy() if request.context else {}
             
             # Extract loan intent from message
             loan_intent = self.extract_loan_intent(request.message, request.loan_intent)
             
+            # Store loan intent in context for future routing
+            if loan_intent and loan_intent.amount:
+                context["loan_intent"] = loan_intent.dict()
+                context["loan_amount"] = loan_intent.amount
+            
             # Determine which agent should handle this
             next_agent_type = self.determine_next_agent(request.message, context, loan_intent)
             
             # Debug logging
-            print(f"🔍 Master Agent Debug:")
-            print(f"   Message: {request.message}")
+            print(f"\n{'='*60}")
+            print(f"🔍 MASTER AGENT ROUTING DECISION:")
+            print(f"   Message: '{request.message}'")
             print(f"   Context Summary: {self._build_conversation_summary(context)}")
             print(f"   Loan Intent: Amount={loan_intent.amount}, Tenure={loan_intent.tenure}")
-            print(f"   Routing to: {next_agent_type.value}")
+            print(f"   Customer ID: {context.get('customer_id')}")
+            print(f"   Verified: {context.get('verification_result', {}).get('verified')}")
+            print(f"   DECISION: Routing to → {next_agent_type.value}")
+            print(f"{'='*60}\n")
             
-            # Update context
+            # Update context - CRITICAL: Set current_agent before routing
             context["current_agent"] = next_agent_type.value
             context["conversation_history"] = context.get("conversation_history", []) + [
                 {"role": "user", "content": request.message}
@@ -217,13 +210,23 @@ class MasterAgent:
                 # Default to sales agent
                 response = self.sales_agent.process(agent_request)
             
+            # CRITICAL: Merge the agent's updated context with our context
+            if response.context:
+                context.update(response.context)
+            
+            # Ensure current_agent is still set correctly
+            context["current_agent"] = next_agent_type.value
+            
             # Update conversation history with AI response
             context["conversation_history"] = context.get("conversation_history", []) + [
                 {"role": "assistant", "content": response.message}
             ]
             
+            # Ensure response has the fully updated context
             response.context = context
-            response.loan_intent = loan_intent  # Make sure loan intent is passed through
+            response.loan_intent = loan_intent
+            
+            print(f"   ✅ Final Context: customer_id={response.context.get('customer_id')}, verified={response.context.get('verification_result', {}).get('verified')}, current_agent={response.context.get('current_agent')}")
             
             return response
             

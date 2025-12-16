@@ -42,6 +42,8 @@ class VerificationAgent:
                 phone_number = phones[0]
         
         verification_result = None
+        customer = None
+        
         if phone_number:
             try:
                 # Get customer from database
@@ -58,16 +60,35 @@ class VerificationAgent:
                             "city": customer["city"]
                         }
                     )
+                    
+                    # CRITICAL: Update context BEFORE creating response
                     context["verification_result"] = verification_result.dict()
                     context["customer_id"] = customer["customer_id"]
+                    context["customer_info"] = {
+                        "customer_id": customer["customer_id"],
+                        "name": customer["name"],
+                        "phone": phone_number,
+                        "email": customer.get("email", "")
+                    }
+                    
+                    # Pass loan intent forward
+                    if request.loan_intent:
+                        context["loan_intent"] = request.loan_intent.dict()
+                        context["loan_amount"] = request.loan_intent.amount
                     
                     if customer.get("kyc_verified", False):
                         verification_message = f"✅ **Verification Successful!**\n\n"
                         verification_message += f"Hello **{customer['name']}**, I've verified your identity.\n"
                         verification_message += f"📍 Location: {customer['city']}\n"
                         verification_message += f"🆔 Customer ID: {customer['customer_id']}\n\n"
-                        verification_message += "Your KYC is complete. Let me now check your loan eligibility..."
-                        next_agent = AgentType.UNDERWRITING
+                        
+                        if request.loan_intent and request.loan_intent.amount:
+                            verification_message += f"**Processing your loan request for ₹{request.loan_intent.amount:,}...**\n\n"
+                            verification_message += "Checking eligibility now..."
+                            next_agent = AgentType.UNDERWRITING
+                        else:
+                            verification_message += "Your KYC is complete. Please tell me how much loan you need."
+                            next_agent = AgentType.SALES
                     else:
                         verification_message = f"⚠️ **Additional Verification Required**\n\n"
                         verification_message += f"Hello **{customer['name']}**, I found your record but your KYC is incomplete.\n"
@@ -91,15 +112,30 @@ class VerificationAgent:
             verification_message += "Please share your phone number (e.g., 9876543210)"
             next_agent = AgentType.VERIFICATION
         
+        # CRITICAL: Print debug info
+        print(f"\n🔐 VERIFICATION AGENT DEBUG:")
+        print(f"   Customer Found: {customer is not None}")
+        if customer:
+            print(f"   Customer ID: {customer['customer_id']}")
+            print(f"   Verified: {customer.get('kyc_verified')}")
+        else:
+            print(f"   Customer ID: None")
+            print(f"   Verified: None")
+        print(f"   Next Agent: {next_agent}")
+        print(f"   Context Keys: {list(context.keys())}")
+        print(f"   Has verification_result in context: {'verification_result' in context}")
+        print(f"   Has customer_id in context: {'customer_id' in context}")
+        
         return AgentResponse(
             message=verification_message,
             next_agent=next_agent,
             customer_info=request.customer_info,
             loan_intent=request.loan_intent,
-            context=context,
+            context=context,  # Make sure this includes updated context
             metadata={
                 "agent": "verification",
                 "phone_provided": phone_number is not None,
-                "verification_result": verification_result.dict() if verification_result else None
+                "verification_result": verification_result.dict() if verification_result else None,
+                "customer_verified": verification_result.verified if verification_result else False
             }
         )

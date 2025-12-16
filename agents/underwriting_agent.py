@@ -29,6 +29,13 @@ class UnderwritingAgent:
         context = request.context.copy()
         context["agent"] = "underwriting"
         
+        # ADD DEBUG LOGS
+        print(f"\n📊 UNDERWRITING AGENT STARTED:")
+        print(f"   Customer ID from context: {context.get('customer_id')}")
+        print(f"   Verification status: {context.get('verification_result', {}).get('verified')}")
+        print(f"   Loan amount from intent: {request.loan_intent.amount if request.loan_intent else None}")
+        print(f"   Context keys: {list(context.keys())}")
+        
         # CRITICAL FIX: Try multiple sources for customer_id
         customer_id = context.get("customer_id")
         
@@ -45,6 +52,7 @@ class UnderwritingAgent:
         
         # If no customer_id found anywhere, return error
         if not customer_id:
+            print("   ❌ ERROR: No customer_id found")
             return AgentResponse(
                 message="🔐 **Customer ID Required**\n\nI need to verify your identity first to check loan eligibility.\nCould you please provide your registered phone number?",
                 next_agent=AgentType.VERIFICATION,
@@ -53,6 +61,7 @@ class UnderwritingAgent:
         
         # If no loan amount specified, ask for it
         if not loan_amount:
+            print("   ❌ ERROR: No loan amount specified")
             return AgentResponse(
                 message="💰 **Loan Amount Required**\n\nTo check your eligibility, I need to know how much loan you're looking for.\n\nExample: '₹3 lakh' or '₹500000'",
                 next_agent=AgentType.SALES,
@@ -60,11 +69,14 @@ class UnderwritingAgent:
                 loan_intent=request.loan_intent
             )
         
+        print(f"   ✅ Proceeding with customer_id: {customer_id}, loan_amount: {loan_amount}")
+        
         # Fetch customer data
         customers_col = db.get_collection("customers")
         customer = customers_col.find_one({"customer_id": customer_id})
         
         if not customer:
+            print(f"   ❌ ERROR: Customer {customer_id} not found in database")
             return AgentResponse(
                 message="❌ **Customer Details Not Found**\n\nPlease complete verification first to proceed with loan eligibility.",
                 next_agent=AgentType.VERIFICATION,
@@ -75,6 +87,8 @@ class UnderwritingAgent:
         credit_score = customer.get("credit_score", 700)
         preapproved_limit = customer.get("preapproved_limit", 100000)
         salary = customer.get("salary", 50000)
+        
+        print(f"   📊 Customer Data: credit_score={credit_score}, preapproved_limit={preapproved_limit}, salary={salary}")
         
         # CRITICAL FIX: Get customer-specific interest rate
         interest_rate = 14.0  # Default
@@ -141,6 +155,10 @@ class UnderwritingAgent:
         
         context["underwriting_result"] = underwriting_result.dict()
         
+        print(f"   📋 Underwriting Decision: {decision}")
+        print(f"   💰 Max Eligible Amount: {underwriting_result.max_eligible_amount}")
+        print(f"   📝 Reason: {reason}")
+        
         # Generate response message
         if decision == "approved":
             message = f"🎉 **LOAN APPROVED!**\n\n"
@@ -202,6 +220,8 @@ class UnderwritingAgent:
                 message += "Would you like to apply for an amount within your eligible limit?"
             
             next_agent = AgentType.SALES
+        
+        print(f"   📤 Returning response. Next agent: {next_agent}")
         
         return AgentResponse(
             message=message,

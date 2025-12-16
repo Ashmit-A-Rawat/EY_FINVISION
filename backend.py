@@ -12,7 +12,6 @@ from contextlib import asynccontextmanager
 
 load_dotenv()
 
-# Lifespan handler for startup/shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -42,7 +41,7 @@ app.add_middleware(
 # Include mock APIs
 app.include_router(mock_apis_router, prefix="/api/mock", tags=["Mock APIs"])
 
-# Initialize agents and database
+# Initialize agents
 master_agent = MasterAgent()
 
 @app.get("/")
@@ -85,9 +84,10 @@ async def chat_endpoint(request: AgentRequest):
         print(f"📤 Outgoing Response:")
         print(f"   Agent: {response.context.get('agent', 'unknown')}")
         print(f"   Next Agent: {response.next_agent}")
-        print(f"   Message Preview: {response.message[:100]}...")
-        if response.loan_intent:
-            print(f"   Loan Intent: Amount={response.loan_intent.amount}, Tenure={response.loan_intent.tenure}")
+        print(f"   Message Length: {len(response.message)} chars")
+        print(f"   Context Keys: {list(response.context.keys())}")
+        print(f"   Has customer_id: {'customer_id' in response.context}")
+        print(f"   Has verification_result: {'verification_result' in response.context}")
         print(f"{'='*60}\n")
         
         return response
@@ -101,7 +101,6 @@ async def chat_endpoint(request: AgentRequest):
 @app.get("/api/download-pdf/{filename}")
 async def download_pdf(filename: str):
     """Download generated sanction letter PDF"""
-    # Create directory if it doesn't exist
     os.makedirs("sanction_letters", exist_ok=True)
     file_path = f"sanction_letters/{filename}"
     
