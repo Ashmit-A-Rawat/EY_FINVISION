@@ -40,7 +40,7 @@ class MasterAgent:
         
         Always respond naturally while maintaining the orchestration logic."""
     
-    def determine_next_agent(self, message: str, current_context: dict) -> AgentType:
+    def determine_next_agent(self, message: str, current_context: dict, loan_intent: LoanIntent = None) -> AgentType:
         """Determine which agent should handle the message"""
         message_lower = message.lower()
         
@@ -50,18 +50,25 @@ class MasterAgent:
         
         # Priority 1: If loan approved and user wants sanction letter
         if current_context.get("underwriting_result", {}).get("decision") == "approved":
-            if any(word in message_lower for word in ["yes", "generate", "sanction", "letter", "proceed", "ok", "sure"]):
+            if any(word in message_lower for word in ["yes", "generate", "sanction", "letter", "proceed", "ok", "sure", "download"]):
                 return AgentType.SANCTION
         
-        # Priority 2: If customer verified AND they mention loan amount/tenure
+        # Priority 2: If customer verified AND loan amount is known (FIXED)
         if current_context.get("customer_id") and current_context.get("verification_result", {}).get("verified"):
-            # Check if message contains loan amount or tenure keywords
+            # Check if loan_intent already has amount from previous messages (CRITICAL FIX)
+            existing_amount = loan_intent.amount if loan_intent else None
+            
+            # Check current message for amount keywords
             has_amount = any(word in message_lower for word in ["lakh", "lac", "thousand", "₹", "rs", "amount"])
             has_numbers = bool(re.search(r'\d+', message))
-            has_loan_intent = any(word in message_lower for word in ["need", "want", "loan", "borrow", "apply"])
+            has_loan_intent_keywords = any(word in message_lower for word in ["need", "want", "loan", "borrow", "apply"])
             
-            # If they mention amount or it's their first message after verification
-            if has_amount or (has_numbers and has_loan_intent):
+            # Route to underwriting if:
+            # 1. Amount already captured in loan_intent, OR
+            # 2. Current message mentions amount, OR
+            # 3. User says "check eligibility" or similar
+            if existing_amount or has_amount or (has_numbers and has_loan_intent_keywords):
+                print(f"   ✅ Routing to Underwriting: existing_amount={existing_amount}, has_amount={has_amount}")
                 return AgentType.UNDERWRITING
             
             # Check for explicit underwriting triggers
@@ -153,6 +160,18 @@ class MasterAgent:
         
         return intent
     
+    def _build_conversation_summary(self, context: dict) -> str:
+        """Build a summary of conversation state for better routing"""
+        summary = []
+        if context.get("customer_id"):
+            summary.append(f"Customer: {context['customer_id']}")
+        if context.get("verification_result", {}).get("verified"):
+            summary.append("KYC: ✅")
+        if context.get("underwriting_result"):
+            decision = context['underwriting_result'].get('decision', 'unknown')
+            summary.append(f"Loan: {decision}")
+        return " | ".join(summary) if summary else "New Session"
+    
     def process(self, request: AgentRequest) -> AgentResponse:
         """Main orchestration method"""
         try:
@@ -162,13 +181,12 @@ class MasterAgent:
             loan_intent = self.extract_loan_intent(request.message, request.loan_intent)
             
             # Determine which agent should handle this
-            next_agent_type = self.determine_next_agent(request.message, context)
+            next_agent_type = self.determine_next_agent(request.message, context, loan_intent)
             
             # Debug logging
             print(f"🔍 Master Agent Debug:")
             print(f"   Message: {request.message}")
-            print(f"   Customer ID: {context.get('customer_id')}")
-            print(f"   Verified: {context.get('verification_result', {}).get('verified')}")
+            print(f"   Context Summary: {self._build_conversation_summary(context)}")
             print(f"   Loan Intent: Amount={loan_intent.amount}, Tenure={loan_intent.tenure}")
             print(f"   Routing to: {next_agent_type.value}")
             

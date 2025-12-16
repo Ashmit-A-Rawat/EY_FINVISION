@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from models.schemas import AgentRequest, AgentResponse, AgentType
 from services.database import db
+import re
 
 load_dotenv()
 
@@ -25,10 +26,12 @@ class SalesAgent:
         6. Collect necessary information for verification
         
         Be empathetic, professional, and sales-focused. Always maintain a helpful tone.
-        Keep responses concise (2-3 sentences max)."""
+        Keep responses concise (2-3 sentences max).
+        
+        IMPORTANT: If the customer mentions a loan amount, confirm it with them and ask for their phone number to proceed."""
     
     def process(self, request: AgentRequest) -> AgentResponse:
-        # Fetch customer's pre-approved offer
+        # Fetch customer's pre-approved offer if phone is available
         customers_col = db.get_collection("customers")
         customer = None
         
@@ -45,6 +48,21 @@ class SalesAgent:
                 role = "Customer" if msg["role"] == "user" else "Agent"
                 conversation_history += f"{role}: {msg['content']}\n"
         
+        # Check if loan intent has amount
+        loan_amount = None
+        tenure = None
+        if request.loan_intent:
+            loan_amount = request.loan_intent.amount
+            tenure = request.loan_intent.tenure
+        
+        # Build prompt with intent awareness
+        intent_context = ""
+        if loan_amount:
+            intent_context = f"\n\nCustomer has expressed interest in: ₹{loan_amount:,.0f}"
+            if tenure:
+                intent_context += f" for {tenure} months"
+            intent_context += "\n\nConfirm these details and ask for their phone number to proceed with verification."
+        
         # Build prompt
         prompt = f"""{self.system_prompt}
 
@@ -52,8 +70,9 @@ Previous conversation:
 {conversation_history}
 
 Customer message: {request.message}
+{intent_context}
 
-Respond as the sales agent. If customer mentions a phone number, guide them to verification."""
+Respond as the sales agent. Be helpful and guide them towards verification."""
         
         try:
             # Call Gemini API
@@ -62,17 +81,30 @@ Respond as the sales agent. If customer mentions a phone number, guide them to v
                 ai_response = response.text
             else:
                 # Fallback response
-                ai_response = self._get_fallback_response(request)
+                ai_response = self._get_fallback_response(request, loan_amount, tenure)
             
         except Exception as e:
             print(f"Gemini API Error: {e}")
-            ai_response = self._get_fallback_response(request)
+            ai_response = self._get_fallback_response(request, loan_amount, tenure)
+        
+        # ENHANCED: Add confirmation if loan amount is captured
+        if loan_amount and not context.get("amount_confirmed"):
+            ai_response += f"\n\n**Just to confirm:**\n"
+            ai_response += f"• Loan Amount: ₹{loan_amount:,}\n"
+            if tenure:
+                ai_response += f"• Tenure: {tenure} months ({tenure//12} years)\n"
+            ai_response += f"\nTo proceed, I'll need your registered phone number for quick verification. 📱"
+            context["amount_confirmed"] = True
         
         # Check if we have enough info to proceed to verification
         proceed_to_verification = False
         message_lower = request.message.lower()
         
-        if customer or any(word in message_lower for word in ["phone", "number", "verify", "987"]):
+        # Extract phone if mentioned
+        phone_match = re.search(r'\b\d{10}\b', request.message)
+        if phone_match:
+            proceed_to_verification = True
+        elif customer or any(word in message_lower for word in ["phone", "number", "verify", "987"]):
             proceed_to_verification = True
         
         return AgentResponse(
@@ -83,11 +115,12 @@ Respond as the sales agent. If customer mentions a phone number, guide them to v
             context=context,
             metadata={
                 "agent": "sales",
-                "proceed_to_verification": proceed_to_verification
+                "proceed_to_verification": proceed_to_verification,
+                "amount_captured": loan_amount is not None
             }
         )
     
-    def _get_fallback_response(self, request: AgentRequest) -> str:
+    def _get_fallback_response(self, request: AgentRequest, loan_amount=None, tenure=None) -> str:
         """Rule-based fallback when API is unavailable"""
         message_lower = request.message.lower()
         
@@ -95,13 +128,17 @@ Respond as the sales agent. If customer mentions a phone number, guide them to v
         if any(word in message_lower for word in ["hi", "hello", "hey", "good morning", "good afternoon"]):
             return "Hello! Welcome to Tata Capital. I'm here to help you with your personal loan needs. What amount are you looking for?"
         
+        # Loan request with amount already captured
+        if loan_amount:
+            return f"Great! I see you're interested in ₹{loan_amount:,}. To check your eligibility and get instant approval, I'll need your registered phone number."
+        
         # Loan request
         if any(word in message_lower for word in ["loan", "need", "want", "looking"]):
-            return "Great! I can definitely help you with that. Could you please share: 1) How much loan amount you need? 2) Your registered phone number for quick verification?"
+            return "I'd be happy to help you with a personal loan! Could you tell me how much you need and what it's for?"
         
         # Amount mentioned
         if any(word in message_lower for word in ["lakh", "thousand", "₹", "rs"]):
             return "Perfect! To proceed with your loan application, I'll need to verify your details. Could you please share your registered phone number?"
         
         # Default
-        return "I'd be happy to help you with your loan application. To get started, could you tell me how much loan you're looking for and your registered phone number?"
+        return "I'd be happy to help you with your loan application. To get started, could you tell me: 1) How much loan you're looking for? 2) Your registered phone number?"
