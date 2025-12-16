@@ -33,6 +33,7 @@ class SanctionAgent:
         loan_amount = context.get("approved_amount", 100000)
         tenure = context.get("tenure", 24)
         emi = context.get("emi", 5000)
+        interest_rate = context.get("interest_rate", 14.0)
         
         # Generate unique reference number
         reference_number = f"TCL/{datetime.now().strftime('%Y%m')}/{str(uuid.uuid4())[:8].upper()}"
@@ -42,7 +43,7 @@ class SanctionAgent:
             customer_name=customer_name,
             loan_amount=loan_amount,
             tenure=tenure,
-            interest_rate=14.0,
+            interest_rate=interest_rate,
             emi=emi,
             sanction_date=datetime.now().strftime("%d-%m-%Y"),
             validity_date=(datetime.now() + timedelta(days=30)).strftime("%d-%m-%Y"),
@@ -53,6 +54,7 @@ class SanctionAgent:
         try:
             pdf_path = generate_sanction_letter_pdf(sanction_letter)
             pdf_generated = True
+            print(f"   📄 PDF generated at: {pdf_path}")
         except Exception as e:
             print(f"Error generating PDF: {e}")
             pdf_path = None
@@ -72,7 +74,7 @@ class SanctionAgent:
         message += f"• **Loan Amount:** ₹{loan_amount:,}\n"
         message += f"• **EMI:** ₹{emi:,} per month\n"
         message += f"• **Tenure:** {tenure} months ({tenure//12} years)\n"
-        message += f"• **Interest Rate:** 14.0% per annum\n"
+        message += f"• **Interest Rate:** {interest_rate}% per annum\n"
         message += f"• **Sanction Date:** {sanction_letter.sanction_date}\n"
         message += f"• **Valid Until:** {sanction_letter.validity_date}\n\n"
         

@@ -187,7 +187,7 @@ class MongoDB:
                 "customer_id": "CUST001",
                 "loan_type": "personal",
                 "max_amount": 500000,
-                "interest_rate": 12.5,
+                "interest_rate": 12.5,  # Rahul gets 12.5% for TEST 1
                 "tenure_options": [12, 24, 36],
                 "processing_fee": 1.5
             },
@@ -202,6 +202,15 @@ class MongoDB:
             },
             {
                 "offer_id": "OFFER003",
+                "customer_id": "CUST003",
+                "loan_type": "personal",
+                "max_amount": 200000,
+                "interest_rate": 14.0,  # Amit gets 14% for TEST 2
+                "tenure_options": [12, 24, 36],
+                "processing_fee": 2.5
+            },
+            {
+                "offer_id": "OFFER004",
                 "customer_id": "CUST004",
                 "loan_type": "personal",
                 "max_amount": 700000,
@@ -210,7 +219,16 @@ class MongoDB:
                 "processing_fee": 1.0
             },
             {
-                "offer_id": "OFFER004",
+                "offer_id": "OFFER005",
+                "customer_id": "CUST005",
+                "loan_type": "personal",
+                "max_amount": 150000,
+                "interest_rate": 15.0,  # Vikram gets 15% for TEST 3
+                "tenure_options": [12, 24],
+                "processing_fee": 3.0
+            },
+            {
+                "offer_id": "OFFER006",
                 "customer_id": "CUST006",
                 "loan_type": "personal",
                 "max_amount": 400000,
@@ -232,6 +250,9 @@ class MongoDB:
             offers_col.insert_many(offers)
             
             print(f"✅ Seeded {len(customers)} customers and {len(offers)} offers")
+            print(f"   TEST 1 Customer: Rahul Sharma (CUST001) - Interest: 12.5%")
+            print(f"   TEST 2 Customer: Amit Kumar (CUST003) - Interest: 14.0%")
+            print(f"   TEST 3 Customer: Vikram Singh (CUST005) - Interest: 15.0%")
             return True
         except Exception as e:
             print(f"⚠️ Error seeding data: {e}")

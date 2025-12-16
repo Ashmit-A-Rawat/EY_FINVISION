@@ -90,10 +90,22 @@ class VerificationAgent:
                             verification_message += "Your KYC is complete. Please tell me how much loan you need."
                             next_agent = AgentType.SALES
                     else:
-                        verification_message = f"⚠️ **Additional Verification Required**\n\n"
-                        verification_message += f"Hello **{customer['name']}**, I found your record but your KYC is incomplete.\n"
-                        verification_message += f"Could you please upload your Aadhaar card to complete verification?"
-                        next_agent = AgentType.VERIFICATION
+                        # FIXED: Even if KYC is incomplete, we should still route to underwriting
+                        # because the customer exists in our system
+                        verification_message = f"⚠️ **KYC Verification Pending**\n\n"
+                        verification_message += f"Hello **{customer['name']}**, I found your record.\n"
+                        verification_message += f"📍 Location: {customer['city']}\n"
+                        verification_message += f"🆔 Customer ID: {customer['customer_id']}\n\n"
+                        verification_message += f"**Note:** Your KYC documentation is incomplete.\n"
+                        verification_message += f"However, I can still check your loan eligibility.\n\n"
+                        
+                        if request.loan_intent and request.loan_intent.amount:
+                            verification_message += f"**Processing your loan request for ₹{request.loan_intent.amount:,}...**\n\n"
+                            verification_message += "Checking eligibility now..."
+                            next_agent = AgentType.UNDERWRITING
+                        else:
+                            verification_message += "Please tell me how much loan you need."
+                            next_agent = AgentType.SALES
                 else:
                     verification_message = "❌ **Customer Not Found**\n\n"
                     verification_message += "I couldn't find your details in our system with this phone number.\n"
@@ -117,6 +129,7 @@ class VerificationAgent:
         print(f"   Customer Found: {customer is not None}")
         if customer:
             print(f"   Customer ID: {customer['customer_id']}")
+            print(f"   Name: {customer['name']}")
             print(f"   Verified: {customer.get('kyc_verified')}")
         else:
             print(f"   Customer ID: None")

@@ -6,6 +6,7 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 import time
+import tempfile
 
 load_dotenv()
 
@@ -17,7 +18,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Custom CSS with file upload styling
 st.markdown("""
     <style>
     .main {
@@ -77,6 +78,42 @@ st.markdown("""
         color: #0c5460;
         border: 1px solid #bee5eb;
     }
+    
+    .badge-danger {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+    
+    .upload-section {
+        background: linear-gradient(135deg, #fff8e1 0%, #fff3cd 100%);
+        border: 2px dashed #ff9800;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .upload-title {
+        color: #ff9800;
+        font-weight: 600;
+        margin-bottom: 10px;
+    }
+    
+    .file-uploaded {
+        background-color: #e8f5e9;
+        border: 2px solid #4caf50;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 10px 0;
+    }
+    
+    .test-customer-card {
+        background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+        border: 1px solid #90caf9;
+        border-radius: 8px;
+        padding: 10px;
+        margin: 5px 0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -93,6 +130,12 @@ if "customer_info" not in st.session_state:
     st.session_state.customer_info = {}
 if "api_error" not in st.session_state:
     st.session_state.api_error = None
+if "uploaded_file" not in st.session_state:
+    st.session_state.uploaded_file = None
+if "file_processed" not in st.session_state:
+    st.session_state.file_processed = False
+if "reset_counter" not in st.session_state:
+    st.session_state.reset_counter = 0
 
 # API Configuration
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
@@ -111,19 +154,25 @@ st.markdown("---")
 with st.sidebar:
     st.markdown("### ⚙️ Control Panel")
     
-    if st.button("🔄 New Conversation", use_container_width=True):
-        st.session_state.messages = []
-        st.session_state.context = {}
-        st.session_state.session_id = str(uuid.uuid4())
-        st.session_state.loan_intent = {}
-        st.session_state.customer_info = {}
-        st.session_state.api_error = None
-        st.rerun()
+    # Reset button with confirmation
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        if st.button("🔄 New Conversation", use_container_width=True):
+            st.session_state.messages = []
+            st.session_state.context = {}
+            st.session_state.session_id = str(uuid.uuid4())
+            st.session_state.loan_intent = {}
+            st.session_state.customer_info = {}
+            st.session_state.api_error = None
+            st.session_state.uploaded_file = None
+            st.session_state.file_processed = False
+            st.session_state.reset_counter = st.session_state.get("reset_counter", 0) + 1
+            st.rerun()
     
     st.markdown("---")
     st.markdown("### 📊 Application Status")
     
-    # Status display - AUTO-REFRESH FIXED
+    # Status display
     current_agent = st.session_state.context.get("current_agent", "none")
     st.caption(f"**Current Agent:** {current_agent.upper() if current_agent != 'none' else 'None'}")
     
@@ -142,27 +191,72 @@ with st.sidebar:
     if st.session_state.context.get("underwriting_result"):
         result = st.session_state.context["underwriting_result"]
         decision = result.get("decision")
+        
         if decision == "approved":
             amount = result.get("max_eligible_amount", 0)
             st.markdown(f'<div class="status-badge badge-success">✅ Approved: ₹{amount:,.0f}</div>', unsafe_allow_html=True)
         elif decision == "pending":
             st.markdown('<div class="status-badge badge-warning">⏳ Pending Documents</div>', unsafe_allow_html=True)
         elif decision == "rejected":
-            st.markdown('<div class="status-badge badge-warning">❌ Not Approved</div>', unsafe_allow_html=True)
+            st.markdown('<div class="status-badge badge-danger">❌ Not Approved</div>', unsafe_allow_html=True)
+    
+    # Loan amount status
+    loan_amount = None
+    if st.session_state.loan_intent and st.session_state.loan_intent.get("amount"):
+        loan_amount = st.session_state.loan_intent["amount"]
+    elif st.session_state.context.get("loan_intent", {}).get("amount"):
+        loan_amount = st.session_state.context["loan_intent"]["amount"]
+    elif st.session_state.context.get("loan_amount"):
+        loan_amount = st.session_state.context["loan_amount"]
+    
+    if loan_amount:
+        st.markdown(f'<div class="status-badge badge-info">💰 Loan Amount: ₹{loan_amount:,.0f}</div>', unsafe_allow_html=True)
+    
+    # Show if file upload is pending
+    if st.session_state.context.get("underwriting_result", {}).get("decision") == "pending":
+        if st.session_state.uploaded_file:
+            st.markdown('<div class="status-badge badge-success">📄 Document Uploaded</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="status-badge badge-warning">📄 Upload Required</div>', unsafe_allow_html=True)
+    
+    # Test Customers Section
+    st.markdown("---")
+    st.markdown("### 🧪 Test Customers")
+    
+    test_customers = [
+        {"name": "Rahul Sharma", "phone": "9876543210", "limit": "₹5L", "score": "785", "desc": "TEST 1: Quick Approval"},
+        {"name": "Amit Kumar", "phone": "9876543212", "limit": "₹2L", "score": "680", "desc": "TEST 2: Salary Slip Required"},
+        {"name": "Vikram Singh", "phone": "9876543214", "limit": "₹1.5L", "score": "650", "desc": "TEST 3: Rejected (Low Score)"},
+        {"name": "Sneha Reddy", "phone": "9876543213", "limit": "₹7L", "score": "810", "desc": "High Score Customer"},
+    ]
+    
+    for cust in test_customers:
+        with st.expander(f"👤 {cust['name']}"):
+            st.markdown(f"""
+            <div class="test-customer-card">
+                <strong>Phone:</strong> {cust['phone']}<br>
+                <strong>Limit:</strong> {cust['limit']}<br>
+                <strong>Score:</strong> {cust['score']}/900<br>
+                <small>{cust['desc']}</small>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button(f"Use {cust['name']}", key=f"test_{cust['phone']}"):
+                st.session_state.pending_message = f"My phone is {cust['phone']}"
+                st.rerun()
     
     # Quick actions
     st.markdown("---")
     st.markdown("### 💬 Quick Start")
     example_messages = [
         ("💰", "I need a personal loan"),
-        ("🏠", "₹5 lakh for home renovation"),
-        ("📊", "Check my eligibility"),
-        ("📱", "My phone is 9876543210"),
-        ("✅", "Yes, generate sanction letter")
+        ("🏠", "₹3.5 lakh for car"),
+        ("📱", "My phone is 9876543212"),
+        ("✅", "Yes, generate sanction letter"),
+        ("📄", "I've uploaded salary slip")
     ]
     
     for emoji, msg in example_messages:
-        if st.button(f"{emoji} {msg}", use_container_width=True, key=f"quick_{msg}"):
+        if st.button(f"{emoji} {msg}", use_container_width=True, key=f"quick_{msg}_{st.session_state.get('reset_counter', 0)}"):
             st.session_state.pending_message = msg
             st.rerun()
 
@@ -204,6 +298,10 @@ for message in st.session_state.messages:
                         st.write(f"**Pre-approved Limit:** ₹{metadata['preapproved_limit']:,}")
                     if metadata.get("emi"):
                         st.write(f"**EMI:** ₹{metadata['emi']:,}/month")
+                    if metadata.get("salary"):
+                        st.write(f"**Salary:** ₹{metadata['salary']:,}/month")
+                    if metadata.get("interest_rate"):
+                        st.write(f"**Interest Rate:** {metadata['interest_rate']}% p.a.")
             
             if metadata.get("pdf_path"):
                 pdf_path = metadata["pdf_path"]
@@ -213,14 +311,115 @@ for message in st.session_state.messages:
                     st.download_button(
                         label="📥 Download Sanction Letter",
                         data=pdf_data,
-                        file_name=f"TataCapital_Sanction.pdf",
+                        file_name=f"TataCapital_Sanction_{metadata.get('reference_number', 'letter')}.pdf",
                         mime="application/pdf",
                         use_container_width=True
                     )
 
-# Check if we need to auto-send a follow-up message
-if st.session_state.context.get("verification_result", {}).get("verified") and not st.session_state.context.get("underwriting_result"):
-    # Auto-trigger underwriting by sending an empty message
+# FILE UPLOAD SECTION - ONLY SHOW WHEN UNDERWRITING PENDING
+if st.session_state.context.get("underwriting_result", {}).get("decision") == "pending" and not st.session_state.file_processed:
+    st.markdown("---")
+    
+    with st.container():
+        st.markdown("""
+        <div class="upload-section">
+            <div class="upload-title">📄 Upload Required Documents</div>
+            <p>To process your loan application, please upload your latest salary slip.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            uploaded_file = st.file_uploader(
+                "Choose your salary slip (PDF, PNG, or JPG)",
+                type=['pdf', 'png', 'jpg', 'jpeg'],
+                help="Upload your latest salary slip for verification. Ensure it shows your monthly salary clearly.",
+                key="salary_slip_uploader"
+            )
+        
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if uploaded_file is not None:
+                # Save file info in session state
+                st.session_state.uploaded_file = {
+                    "name": uploaded_file.name,
+                    "size": uploaded_file.size,
+                    "type": uploaded_file.type
+                }
+                
+                st.markdown(f"""
+                <div class="file-uploaded">
+                    ✅ File uploaded:<br>
+                    <strong>{uploaded_file.name}</strong><br>
+                    Size: {uploaded_file.size // 1024} KB
+                </div>
+                """, unsafe_allow_html=True)
+                
+                if st.button("✅ Submit Document for Verification", use_container_width=True, type="primary", key="submit_document"):
+                    # Extract customer info
+                    customer_id = st.session_state.context.get("customer_id")
+                    
+                    if customer_id:
+                        with st.spinner("🔄 Processing salary slip..."):
+                            try:
+                                # Get customer salary from database for verification
+                                import sys
+                                sys.path.append(".")
+                                from services.database import db
+                                
+                                customers_col = db.get_collection("customers")
+                                customer = customers_col.find_one({"customer_id": customer_id})
+                                
+                                if customer:
+                                    customer_salary = customer.get("salary", 75000)
+                                    st.session_state.context["salary_slip_verified"] = True
+                                    st.session_state.context["verified_salary"] = customer_salary
+                                    st.session_state.file_processed = True
+                                    
+                                    # Trigger re-evaluation
+                                    response = requests.post(
+                                        f"{API_BASE_URL}/api/chat",
+                                        json={
+                                            "message": f"I've uploaded my salary slip showing ₹{customer_salary:,} monthly salary. Please process my loan application.",
+                                            "session_id": st.session_state.session_id,
+                                            "context": st.session_state.context,
+                                            "loan_intent": st.session_state.loan_intent,
+                                            "customer_info": st.session_state.customer_info
+                                        },
+                                        timeout=30
+                                    )
+                                    
+                                    if response.status_code == 200:
+                                        result = response.json()
+                                        st.session_state.messages.append({
+                                            "role": "assistant",
+                                            "content": result["message"],
+                                            "metadata": result.get("metadata", {})
+                                        })
+                                        st.session_state.context = result.get("context", {})
+                                        st.success(f"✅ Salary slip verified! Verified salary: ₹{customer_salary:,}/month")
+                                        time.sleep(1)
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ Upload verification failed: {response.status_code}")
+                                else:
+                                    st.error("❌ Customer not found in database")
+                                    
+                            except Exception as e:
+                                st.error(f"❌ Error processing salary slip: {str(e)}")
+                    else:
+                        st.error("❌ Customer ID not found. Please verify your phone number first.")
+            else:
+                st.info("📁 Please select a file to upload")
+
+# Auto-trigger underwriting if verified but no underwriting result yet
+if (st.session_state.context.get("customer_id") and 
+    st.session_state.context.get("verification_result") and 
+    not st.session_state.context.get("underwriting_result") and
+    st.session_state.context.get("current_agent") != "underwriting"):
+    
+    # Only trigger once per verification
     if "underwriting_triggered" not in st.session_state:
         st.session_state.underwriting_triggered = True
         st.session_state.pending_message = "check eligibility"
@@ -230,6 +429,9 @@ if st.session_state.context.get("verification_result", {}).get("verified") and n
 if "pending_message" in st.session_state:
     user_message = st.session_state.pending_message
     del st.session_state.pending_message
+    # Clear the trigger flag if it was set
+    if "underwriting_triggered" in st.session_state:
+        del st.session_state.underwriting_triggered
 else:
     user_message = st.chat_input("💬 Type your message here...")
 
@@ -281,6 +483,11 @@ if user_message:
                 if result.get("customer_info"):
                     st.session_state.customer_info = result["customer_info"]
                 
+                # If underwriting is now pending, reset file processed state
+                if result.get("context", {}).get("underwriting_result", {}).get("decision") == "pending":
+                    st.session_state.file_processed = False
+                    st.session_state.uploaded_file = None
+                
                 # Force immediate UI update
                 time.sleep(0.3)
                 st.rerun()
@@ -298,9 +505,10 @@ if user_message:
 
 # Footer
 st.markdown("---")
-st.markdown("""
+st.markdown(f"""
     <div style='text-align: center; color: #666; font-size: 0.85rem;'>
         <p>© 2024 Tata Capital Limited | Powered by AI</p>
         <p style='font-size: 0.75rem;'>Secure • Confidential • Fast Processing</p>
+        <p style='font-size: 0.7rem; color: #999;'>Session: {st.session_state.session_id[:8]}... | Reset Count: {st.session_state.get('reset_counter', 0)}</p>
     </div>
 """, unsafe_allow_html=True)

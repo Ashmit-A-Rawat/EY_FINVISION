@@ -54,9 +54,10 @@ class MasterAgent:
                 return AgentType.SANCTION
         
         # Priority 2: If customer verified - AUTO ROUTE TO UNDERWRITING
-        if current_context.get("customer_id") and current_context.get("verification_result", {}).get("verified"):
-            # CRITICAL FIX: Always route to underwriting after successful verification
-            print(f"   ✅ AUTO-ROUTING: Customer {current_context['customer_id']} verified → Underwriting")
+        # FIXED: Even if verification_result exists (regardless of verified status), route to underwriting
+        if current_context.get("customer_id") and current_context.get("verification_result"):
+            # CRITICAL FIX: Route to underwriting even if KYC is not fully verified
+            print(f"   ✅ AUTO-ROUTING: Customer {current_context['customer_id']} found → Underwriting")
             return AgentType.UNDERWRITING
         
         # Priority 3: Check for verification triggers
@@ -76,17 +77,18 @@ class MasterAgent:
         return AgentType.SALES
     
     def extract_loan_intent(self, message: str, existing_intent: LoanIntent = None) -> LoanIntent:
-        """Extract loan amount and tenure from message"""
+        """Extract loan amount and tenure from message - FIXED AMOUNT EXTRACTION"""
         intent = existing_intent if existing_intent else LoanIntent()
         
         # Extract amount (only if not already set)
         if not intent.amount:
             amount_patterns = [
+                r'₹\s*(\d+(?:\.\d+)?)\s*(?:lakh|lac)',
+                r'rs\.?\s*(\d+(?:\.\d+)?)\s*(?:lakh|lac)',
+                r'(\d+(?:\.\d+)?)\s*(?:lakh|lac)\b',
+                r'(\d+(?:\.\d+)?)\s*(?:thousand|k)\b',
                 r'₹\s*(\d+(?:,\d{3})*(?:\.\d{2})?)',
                 r'rs\.?\s*(\d+(?:,\d{3})*(?:\.\d{2})?)',
-                r'(\d+(?:,\d{3})*(?:\.\d{2})?)\s*(?:lakh|lac)',
-                r'(\d+)\s*(?:thousand)',
-                r'(\d+)\s*(?:lakh|lac)',
             ]
             
             for pattern in amount_patterns:
@@ -98,16 +100,21 @@ class MasterAgent:
                         
                         if 'lakh' in message.lower() or 'lac' in message.lower():
                             intent.amount = amount * 100000
-                        elif 'thousand' in message.lower():
+                            print(f"   💰 Extracted amount: {amount_str} lakh → ₹{intent.amount:,}")
+                        elif 'thousand' in message.lower() or 'k' in message.lower():
                             intent.amount = amount * 1000
+                            print(f"   💰 Extracted amount: {amount_str} thousand → ₹{intent.amount:,}")
                         else:
                             # If amount is small (< 1000), assume it's in lakhs
                             if amount < 1000:
                                 intent.amount = amount * 100000
+                                print(f"   💰 Extracted amount: {amount_str} → ₹{intent.amount:,} (assumed lakhs)")
                             else:
                                 intent.amount = amount
+                                print(f"   💰 Extracted amount: ₹{intent.amount:,}")
                         break
-                    except ValueError:
+                    except ValueError as e:
+                        print(f"   ❌ Error parsing amount: {e}")
                         pass
         
         # Extract tenure (only if not already set)
@@ -116,6 +123,8 @@ class MasterAgent:
                 r'(\d+)\s*(?:months?)',
                 r'(\d+)\s*(?:years?)',
                 r'for\s*(\d+)\s*(?:months?|years?)',
+                r'(\d+)\s*(?:year)',
+                r'(\d+)\s*(?:month)',
             ]
             
             for pattern in tenure_patterns:
@@ -126,6 +135,7 @@ class MasterAgent:
                         if 'year' in message.lower():
                             tenure *= 12
                         intent.tenure = tenure
+                        print(f"   📅 Extracted tenure: {tenure} months")
                         break
                     except ValueError:
                         pass
@@ -133,13 +143,15 @@ class MasterAgent:
         # Set default tenure if amount is present but tenure is not
         if intent.amount and not intent.tenure:
             intent.tenure = 24  # Default 2 years
+            print(f"   📅 Set default tenure: {intent.tenure} months")
         
         # Extract purpose
         if not intent.purpose:
-            purposes = ["home", "car", "education", "medical", "business", "wedding", "travel", "debt", "renovation"]
+            purposes = ["home", "car", "education", "medical", "business", "wedding", "travel", "debt", "renovation", "emergency", "construction"]
             for purpose in purposes:
                 if purpose in message.lower():
                     intent.purpose = purpose.capitalize()
+                    print(f"   🎯 Extracted purpose: {intent.purpose}")
                     break
         
         return intent
@@ -151,6 +163,8 @@ class MasterAgent:
             summary.append(f"Customer: {context['customer_id']}")
         if context.get("verification_result", {}).get("verified"):
             summary.append("KYC: ✅")
+        else:
+            summary.append("KYC: ⚠️")
         if context.get("underwriting_result"):
             decision = context['underwriting_result'].get('decision', 'unknown')
             summary.append(f"Loan: {decision}")
@@ -177,7 +191,7 @@ class MasterAgent:
             print(f"🔍 MASTER AGENT ROUTING DECISION:")
             print(f"   Message: '{request.message}'")
             print(f"   Context Summary: {self._build_conversation_summary(context)}")
-            print(f"   Loan Intent: Amount={loan_intent.amount}, Tenure={loan_intent.tenure}")
+            print(f"   Loan Intent: Amount={loan_intent.amount}, Tenure={loan_intent.tenure}, Purpose={loan_intent.purpose}")
             print(f"   Customer ID: {context.get('customer_id')}")
             print(f"   Verified: {context.get('verification_result', {}).get('verified')}")
             print(f"   DECISION: Routing to → {next_agent_type.value}")

@@ -51,16 +51,26 @@ class SalesAgent:
         # Check if loan intent has amount
         loan_amount = None
         tenure = None
+        purpose = None
         if request.loan_intent:
             loan_amount = request.loan_intent.amount
             tenure = request.loan_intent.tenure
+            purpose = request.loan_intent.purpose
         
         # Build prompt with intent awareness
         intent_context = ""
         if loan_amount:
-            intent_context = f"\n\nCustomer has expressed interest in: ₹{loan_amount:,.0f}"
+            # Format amount nicely
+            if loan_amount >= 100000:
+                amount_str = f"₹{loan_amount/100000:.1f} lakh" if loan_amount % 100000 != 0 else f"₹{loan_amount//100000} lakh"
+            else:
+                amount_str = f"₹{loan_amount:,}"
+            
+            intent_context = f"\n\nCustomer has expressed interest in: {amount_str}"
             if tenure:
                 intent_context += f" for {tenure} months"
+            if purpose:
+                intent_context += f" for {purpose}"
             intent_context += "\n\nConfirm these details and ask for their phone number to proceed with verification."
         
         # Build prompt
@@ -81,18 +91,26 @@ Respond as the sales agent. Be helpful and guide them towards verification."""
                 ai_response = response.text
             else:
                 # Fallback response
-                ai_response = self._get_fallback_response(request, loan_amount, tenure)
+                ai_response = self._get_fallback_response(request, loan_amount, tenure, purpose)
             
         except Exception as e:
             print(f"Gemini API Error: {e}")
-            ai_response = self._get_fallback_response(request, loan_amount, tenure)
+            ai_response = self._get_fallback_response(request, loan_amount, tenure, purpose)
         
         # ENHANCED: Add confirmation if loan amount is captured
         if loan_amount and not context.get("amount_confirmed"):
+            # Format amount properly
+            if loan_amount >= 100000:
+                amount_str = f"₹{loan_amount/100000:.1f} lakh" if loan_amount % 100000 != 0 else f"₹{loan_amount//100000} lakh"
+            else:
+                amount_str = f"₹{loan_amount:,}"
+            
             ai_response += f"\n\n**Just to confirm:**\n"
-            ai_response += f"• Loan Amount: ₹{loan_amount:,}\n"
+            ai_response += f"• Loan Amount: {amount_str} (₹{loan_amount:,})\n"
             if tenure:
                 ai_response += f"• Tenure: {tenure} months ({tenure//12} years)\n"
+            if purpose:
+                ai_response += f"• Purpose: {purpose}\n"
             ai_response += f"\nTo proceed, I'll need your registered phone number for quick verification. 📱"
             context["amount_confirmed"] = True
         
@@ -120,7 +138,7 @@ Respond as the sales agent. Be helpful and guide them towards verification."""
             }
         )
     
-    def _get_fallback_response(self, request: AgentRequest, loan_amount=None, tenure=None) -> str:
+    def _get_fallback_response(self, request: AgentRequest, loan_amount=None, tenure=None, purpose=None) -> str:
         """Rule-based fallback when API is unavailable"""
         message_lower = request.message.lower()
         
@@ -130,14 +148,23 @@ Respond as the sales agent. Be helpful and guide them towards verification."""
         
         # Loan request with amount already captured
         if loan_amount:
-            return f"Great! I see you're interested in ₹{loan_amount:,}. To check your eligibility and get instant approval, I'll need your registered phone number."
+            if loan_amount >= 100000:
+                amount_str = f"₹{loan_amount/100000:.1f} lakh" if loan_amount % 100000 != 0 else f"₹{loan_amount//100000} lakh"
+            else:
+                amount_str = f"₹{loan_amount:,}"
+            
+            response = f"Great! I see you're interested in {amount_str}."
+            if purpose:
+                response += f" for {purpose}"
+            response += " To check your eligibility and get instant approval, I'll need your registered phone number."
+            return response
         
         # Loan request
-        if any(word in message_lower for word in ["loan", "need", "want", "looking"]):
+        if any(word in message_lower for word in ["loan", "need", "want", "looking", "apply"]):
             return "I'd be happy to help you with a personal loan! Could you tell me how much you need and what it's for?"
         
         # Amount mentioned
-        if any(word in message_lower for word in ["lakh", "thousand", "₹", "rs"]):
+        if any(word in message_lower for word in ["lakh", "thousand", "₹", "rs", "crore"]):
             return "Perfect! To proceed with your loan application, I'll need to verify your details. Could you please share your registered phone number?"
         
         # Default

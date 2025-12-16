@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 
 load_dotenv()
 
+# Lifespan handler for startup/shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
