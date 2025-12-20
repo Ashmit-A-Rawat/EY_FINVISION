@@ -6,8 +6,17 @@
 
 ---
 
+## 🔗 Live Demo
+
+- **Frontend Application:** https://tatacapitalloanassistant.streamlit.app/
+- **Backend API:** https://web-production-c3d87.up.railway.app/
+- **Demo Video:** https://drive.google.com/file/d/1tYKaIb-xkqBH_4rBcf_8syzY2U-8o8sn/view
+
+---
+
 ## 📋 Table of Contents
 
+- [Live Demo](#-live-demo)
 - [Overview](#-overview)
 - [Key Features](#-key-features)
 - [Architecture](#-architecture)
@@ -245,10 +254,18 @@ streamlit run app.py
 
 ### Access the Application
 
+**Live Deployment:**
+- **Frontend:** https://tatacapitalloanassistant.streamlit.app/
+- **Backend API:** https://web-production-c3d87.up.railway.app/
+
+**Local Development:**
 - **Frontend UI:** http://localhost:8501
 - **Backend API:** http://localhost:8000
 - **API Documentation:** http://localhost:8000/docs
 - **Health Check:** http://localhost:8000/api/health
+
+**Demo:**
+- **Video Tutorial:** https://drive.google.com/file/d/1tYKaIb-xkqBH_4rBcf_8syzY2U-8o8sn/view
 
 ---
 
